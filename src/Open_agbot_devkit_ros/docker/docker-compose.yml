@@ -1,0 +1,17 @@
+services:
+  basekit:
+    build:
+      context: ../../../
+      dockerfile: src/Open_agbot_devkit_ros/docker/Dockerfile
+    image: agroecology/open_agbot:latest
+    container_name: open_agbot_basekit
+    privileged: true
+    network_mode: host
+    restart: unless-stopped
+    group_add:
+      - dialout
+    volumes:
+      - /dev:/dev
+    environment:
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - PYTHONUNBUFFERED=1

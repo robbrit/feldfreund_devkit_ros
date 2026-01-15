@@ -1,0 +1,6 @@
+-r requirements.txt
+autopep8
+mypy
+pre-commit
+pylint
+ruff

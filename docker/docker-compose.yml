@@ -1,32 +1,31 @@
-version: '3.9'
-
 services:
   basekit:
     build:
-      context: ..
-      dockerfile: docker/Dockerfile
+      context: ../../../
+      dockerfile: src/Open_agbot_devkit_ros/docker/Dockerfile
     image: agroecology/open_agbot:latest
     container_name: open_agbot_basekit
-    
-    # Required for hardware access (GPS/ESP32)
     privileged: true
-    
-    # Required for ROS 2 Discovery and NiceGUI web access
     network_mode: host
+    restart: unless-stopped
     
-    # Mount hardware device nodes
+    # Ensures the container has the same serial permissions as your 'dialout' group
+    group_add:
+      - dialout
+
+    # Mapping your ThinkPad's physical USB ports to the robot's expected internal paths
+    devices:
+      - "/dev/ttyACM0:/dev/ttyTHS0"  # ESP32/Lizard mapped to the 'Jetson' port
+      - "/dev/ttyACM1:/dev/ttyACM1"  # RTK GPS port
+
     volumes:
       - /dev:/dev
-    
-    environment:
-      # Ensures the high-performance middleware we fixed is used
-      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-      # Prevents Python from buffering logs (see logs in real-time)
-      - PYTHONUNBUFFERED=1
-    
-    # Automatically restarts the bot if it crashes or the computer reboots
-    restart: unless-stopped
+      # Persistent storage for logs or local parameter overrides if needed
+      - ./config:/workspace/install/basekit_launch/share/basekit_launch/config
 
-    # Optional: ensure udev is handled if the host has specific rules
-    # devices:
-    #   - /dev:/dev
+    environment:
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - PYTHONUNBUFFERED=1
+      # Explicitly telling NiceGUI to bind to all interfaces for the WebUI
+      - HOST=0.0.0.0 
+      - PORT=8080

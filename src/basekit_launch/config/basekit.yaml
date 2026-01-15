@@ -1,0 +1,61 @@
+/**:
+  ros__parameters:
+    use_axis_camera: false # DISABLED to prevent ThinkPad crash
+    hw_platform: "laptop"  # Helps driver skip Jetson-specific GPIO
+
+# ESP32 / Lizard Driver Node
+controller:
+  ros__parameters:
+    # --- THINKPAD FIX ---
+    port: "/dev/ttyACM0" 
+    baudrate: 115200
+    
+    # --- IMPORTANT: KEEP THESE ---
+    use_lizard: true
+    robot_type: "lizard"
+    publish_tf: true
+    base_frame: "base_link"
+    odom_frame: "odom"
+
+# U-blox GPS Node
+ublox_gps_node:
+  ros__parameters:
+    # --- THINKPAD FIX ---
+    device: "/dev/ttyACM1"
+    
+    # --- IMPORTANT: KEEP THESE FOR RTK ---
+    uart1:
+      baudrate: 460800
+    frame_id: "gps"
+    gnss:
+      gps: true
+      glonass: true
+      galileo: true
+      beidou: true
+    inf:
+      all: true # Log all info for debugging RTK fix
+    publish:
+      all: true
+      nav:
+        pvt: true
+        sat: true
+    # Accuracy settings
+    meas: 5
+    dgnss_mode: 3 # RTK Fixed/Float mode
+
+# Web UI
+web_ui:
+  ros__parameters:
+    host: "0.0.0.0"
+    port: 8080
+
+# Static transforms (Required for Navigation stack)
+tf_base_link_imu:
+  ros__parameters:
+    translation: [0.0, 0.0, 0.0]
+    rotation: [0.0, 0.0, 0.0, 1.0]
+
+tf_imu_gnss:
+  ros__parameters:
+    translation: [0.0, 0.0, 0.0]
+    rotation: [0.0, 0.0, 0.0, 1.0]

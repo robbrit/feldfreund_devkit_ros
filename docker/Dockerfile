@@ -1,58 +1,67 @@
-FROM ros:humble
+# Use the official ROS 2 Humble base
+FROM ros:humble-ros-base
 
-# Download Lizard - this is split out to speed up the builds
-RUN apt-get update && apt-get install -y wget unzip
+# 1. Setup Environment & Mirrors
+ENV DEBIAN_FRONTEND=noninteractive
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+ENV PYTHONPATH="/root/.lizard"
 
-RUN mkdir -p /root/.lizard && \
-    cd /root && \
-    LATEST_VERSION=$(curl -s https://api.github.com/repos/zauberzeug/lizard/releases/latest | grep -oP '"tag_name": "\K(.*)(?=")') && \
-    wget https://github.com/zauberzeug/lizard/releases/download/${LATEST_VERSION}/lizard_firmware_and_devtools_${LATEST_VERSION}_esp32.zip && \
-    unzip lizard_firmware_and_devtools_${LATEST_VERSION}_esp32.zip -d /root/.lizard && \
-    rm -f lizard_firmware_and_devtools_${LATEST_VERSION}.zip
+# 2. Hardening Apt & Installing Base Tools
+# We switch to the Azure mirror for better reliability during ROS buildfarm syncs
+RUN sed -i 's/archive.ubuntu.com/azure.archive.ubuntu.com/g' /etc/apt/sources.list && \
+    apt-get update && apt-get install -y --fix-missing --no-install-recommends \
+    wget curl ca-certificates unzip git nano python3-pip software-properties-common && \
+    add-apt-repository universe && \
+    apt-get update
 
-# Install all the dependencies
-RUN apt-get install -y \
-        ros-humble-domain-bridge \
-        ros-humble-rmw-cyclonedds-cpp \
-        ros-humble-foxglove-bridge \
-        ros-humble-xacro \
-        ros-humble-rosbag2-storage-mcap \
-        ros-humble-foxglove-msgs \
-        ros-humble-tf-transformations \
-        ros-humble-septentrio-gnss-driver \
-        ros-humble-usb-cam \
-        ros-humble-image-transport \
-        ros-humble-image-transport-plugins \
-        ros-humble-image-tools \
-        ros-humble-compressed-image-transport \
-        ros-humble-axis-camera \
-        python3-pip \
-        python3-serial \
-        python3-requests \
-        python3-yaml \
-        git \
-        nano \
-        iputils-ping
+# 3. Robust Dependency Management
+# We split the install to ensure that if a ROS mirror is syncing, 
+# we can retry specific packages without failing the whole build.
+RUN for i in {1..5}; do apt-get update && break || sleep 5; done && \
+    apt-get install -y --fix-missing --no-install-recommends \
+    # Hardware Communication
+    python3-serial udev libasio-dev \
+    # ROS Build Tools
+    python3-colcon-common-extensions \
+    # Required ROS 2 Humble Packages
+    ros-humble-usb-cam \
+    ros-humble-xacro \
+    ros-humble-nmea-msgs \
+    ros-humble-joint-state-publisher \
+    ros-humble-robot-state-publisher \
+    ros-humble-controller-manager \
+    ros-humble-diff-drive-controller \
+    ros-humble-twist-mux \
+    # Middleware (CycloneDDS & Iceoryx)
+    ros-humble-rmw-cyclonedds-cpp \
+    ros-humble-iceoryx-binding-c ros-humble-iceoryx-hoofs ros-humble-iceoryx-posh && \
+    rm -rf /var/lib/apt/lists/*
 
-COPY ./docker/bashrc /root/.bashrc
+# 4. Lizard Espresso Firmware & Devtools
+# Instead of a static link, this fetches the latest version dynamically
+RUN mkdir -p /root/.lizard && cd /root && \
+    LATEST_TAG=$(curl -s https://api.github.com/repos/zauberzeug/lizard/releases/latest | grep -oP '"tag_name": "\K(.*)(?=")') && \
+    wget -O lizard.zip "https://github.com/zauberzeug/lizard/releases/download/${LATEST_TAG}/lizard_firmware_and_devtools_${LATEST_TAG}_esp32.zip" && \
+    unzip -o lizard.zip -d /root/.lizard && rm lizard.zip && \
+    chmod +x /root/.lizard/espresso.py
 
-# Actually install Lizard
-RUN chmod +x /root/.lizard/espresso.py && \
-    cd /root/.lizard && \
-    pip install -r requirements.txt && \
-    cd /root && \
-    echo "export PYTHONPATH=/root/.lizard:$PYTHONPATH" >> /root/.bashrc
-
-COPY requirements*.txt /root/
-RUN pip install -r /root/requirements-dev.txt
-
-# Copy ROS packages
-COPY ./basekit_driver /workspace/src/basekit_driver
-COPY ./basekit_launch /workspace/src/basekit_launch
-COPY ./basekit_ui /workspace/src/basekit_ui
-
-# Build ROS packages
+# 5. Core Python Dependencies (NiceGUI / AgBot Stack)
+# 6. Workspace Setup
 WORKDIR /workspace
+# Copy the source code from the local context
+COPY ./src ./src
+
+# Build the workspace using a staged approach to handle ublox dependencies
 RUN . /opt/ros/humble/setup.sh && \
-    colcon build --packages-select basekit_driver basekit_launch basekit_ui --symlink-install && \
-    . install/setup.sh
+    colcon build --symlink-install --packages-select ublox_serialization && \
+    . install/setup.sh && \
+    colcon build --symlink-install --packages-select ublox_msgs && \
+    . install/setup.sh && \
+    colcon build --symlink-install --parallel-workers 1
+
+# 7. Environment Sourcing
+RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc && \
+    echo "source /workspace/install/setup.bash" >> /root/.bashrc
+
+# 8. Entrypoint
+ENTRYPOINT ["/bin/bash", "-c", "source /opt/ros/humble/setup.sh && source install/setup.bash && ros2 launch basekit_launch basekit.launch.py"]

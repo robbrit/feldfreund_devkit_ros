@@ -35,26 +35,15 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 ENV PYTHONPATH="/root/.lizard"
 
-# 1. System Dependencies - Pure ROS 2 / Ament tools
-RUN echo 'Acquire::http::Pipeline-Depth "0"; Acquire::Retries "100";' > /etc/apt/apt.conf.d/99-resilience
-
-RUN for i in {1..10}; do \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
-    curl wget ca-certificates \
-    python3-pip python3-venv \
-    python3-colcon-common-extensions \
-    python3-rosdep \
-    libasio-dev unzip git nano \
-    ros-humble-usb-cam \
-    ros-humble-xacro \
-    ros-humble-nmea-msgs \
-    ros-humble-rtcm-msgs \
-    ros-humble-diagnostic-updater \
-    ros-humble-twist-mux \
-    ros-humble-rmw-cyclonedds-cpp && \
-    break || sleep 10; \
-    done && rm -rf /var/lib/apt/lists/*
+# 1. System Tools & ROS 2 Dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl wget ca-certificates unzip git nano \
+    python3-pip python3-colcon-common-extensions \
+    libasio-dev \
+    ros-humble-usb-cam ros-humble-xacro ros-humble-nmea-msgs \
+    ros-humble-rtcm-msgs ros-humble-diagnostic-updater \
+    ros-humble-twist-mux ros-humble-rmw-cyclonedds-cpp && \
+    rm -rf /var/lib/apt/lists/*
 
 # 2. Lizard Espresso Setup
 RUN mkdir -p /root/.lizard && cd /root && \
@@ -63,18 +52,15 @@ RUN mkdir -p /root/.lizard && cd /root && \
     unzip -q *.zip -d /root/.lizard && rm *.zip && \
     chmod +x /root/.lizard/espresso.py
 
-# 3. Python Venv isolation (NiceGUI & Lizard API)
-# We do NOT add the venv to the PATH here to avoid hijacking the 'colcon' build
-ENV VIRTUAL_ENV=/opt/agbot_venv
-RUN python3 -m venv $VIRTUAL_ENV && \
-    $VIRTUAL_ENV/bin/pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    $VIRTUAL_ENV/bin/pip install --no-cache-dir nicegui pyserial requests pyyaml
+# 3. Direct Python Package Installation (No Venv)
+# We use --break-system-packages because this is a dedicated container
+RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip3 install --no-cache-dir nicegui pyserial requests pyyaml
 
-# 4. Workspace Build (ament/colcon)
+# 4. Workspace Build
 WORKDIR /workspace
 COPY ./src ./src
 
-# Build using system python to ensure all ROS 2 ament/colcon hooks work
 RUN . /opt/ros/humble/setup.sh && \
     colcon build --symlink-install --packages-select ublox_serialization && \
     . install/setup.sh && \
@@ -82,14 +68,14 @@ RUN . /opt/ros/humble/setup.sh && \
     . install/setup.sh && \
     colcon build --symlink-install --parallel-workers 1
 
-# 5. Final Path Configuration
-# Now we source everything together for the runtime environment
-ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+# Auto-source ROS and Workspace for anyone logging in
+RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc && \
+    echo "source /workspace/install/setup.bash" >> /root/.bashrc
 
-ENTRYPOINT ["/bin/bash", "-c", "source /opt/ros/humble/setup.sh && source /opt/agbot_venv/bin/activate && source install/setup.bash && ros2 launch basekit_launch basekit.launch.py"]
+ENTRYPOINT ["/bin/bash", "-c", "source /opt/ros/humble/setup.sh && source install/setup.bash && ros2 launch basekit_launch basekit.launch.py"]
 """)
 
 if run_cmd(f"docker build -t {IMAGE_NAME} -f docker/Dockerfile .", cwd=TARGET_DIR):
-    print("\n✅ ROS 2 Build Successful.")
+    print("\n✅ Build Successful (Simplified No-Venv Version).")
 else:
     print("\n❌ Build failed.")

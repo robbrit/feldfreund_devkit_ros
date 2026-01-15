@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# --- 1. CONFIGURATION & MESSAGE CAPTURE ---
+# --- 1. CONFIGURATION ---
 if [ "$1" == "-dev" ]; then
     BRANCH="dev"
     shift
@@ -23,37 +23,43 @@ echo "💬 Message: $MESSAGE"
 echo "--------------------------------------------"
 
 # --- 3. BRANCH MANAGEMENT ---
-echo "🌿 Checking out $BRANCH..."
-git checkout $BRANCH 2>/dev/null || git checkout -b $BRANCH
+# Check if branch exists, if not create it
+if ! git rev-parse --verify $BRANCH >/dev/null 2>&1; then
+    echo "🌿 Creating new local branch: $BRANCH"
+    git checkout -b $BRANCH
+else
+    echo "🌿 Switching to branch: $BRANCH"
+    git checkout $BRANCH
+fi
 
 # --- 4. GIT WORKFLOW ---
 echo "📦 Adding changes..."
 git add .
 
 echo "📝 Committing..."
-# Capture output to check if there were actually changes
-COMMIT_OUTPUT=$(git commit -m "$MESSAGE" 2>&1)
-if echo "$COMMIT_OUTPUT" | grep -q "nothing to commit"; then
-    echo "⚠️  Nothing to commit (working tree clean)."
-else
-    echo "✅ Commit successful."
-fi
+# We allow this to fail if there's nothing new to commit
+git commit -m "$MESSAGE" || echo "⚠️  Nothing new to commit."
 
-echo "🔄 Pulling latest from GitHub (Rebase)..."
-if git pull origin $BRANCH --rebase; then
-    echo "✅ Sync complete."
+# --- 5. SYNC LOGIC (The "Fix") ---
+# Check if the branch exists on the server (remote)
+if git ls-remote --exit-code --heads origin $BRANCH >/dev/null 2>&1; then
+    echo "🔄 Branch exists on GitHub. Pulling & Rebasing..."
+    if ! git pull origin $BRANCH --rebase; then
+        echo "❌ ERROR: Conflict detected during pull! Fix manually then run: git rebase --continue"
+        exit 1
+    fi
 else
-    echo "❌ Sync failed! You might have conflicts to resolve manually."
-    exit 1
+    echo "🆕 Branch not on GitHub yet. Skipping pull..."
 fi
 
 echo "🚀 Pushing to origin..."
-if git push origin $BRANCH; then
+# -u sets the upstream so future 'git push' works without arguments
+if git push -u origin $BRANCH; then
     echo "--------------------------------------------"
     echo "✨ SUCCESS: Your changes are now on GitHub!"
     echo "🔗 URL: https://github.com/Agroecology-Lab/Open_agbot_devkit_ros/tree/$BRANCH"
     echo "--------------------------------------------"
 else
-    echo "❌ Push failed. Check your token or network."
+    echo "❌ Error: Push failed. Check your internet or GitHub token."
     exit 1
 fi
